@@ -5,6 +5,18 @@
   #include <windows.h>
 #include <stdbool.h>
 
+/*define*/
+#define CTRL_KEY(k) ((k) & 0x1f)
+
+/*struct*/
+struct editorConfig {
+  int width;
+  int height;
+};
+
+struct editorConfig E;
+
+/*terminal*/
 void panic(const char *s) {
   perror(s);
   exit(1);
@@ -18,7 +30,6 @@ void setMode() {
   mode = ENABLE_INSERT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT 
         | ENABLE_MOUSE_INPUT | ENABLE_PROCESSED_INPUT ;
   SetConsoleMode(hStdin,mode);
-  /*atexit(returnMode);*/
 }
 
 void enableVT () {
@@ -51,8 +62,59 @@ void moveCursorto(unsigned x, unsigned y){
   printf("\x1b[%d;%dH",x,y);
 }
 
+void moveCursorHome(){
+  printf("\x1b[H");
+}
+
 void changeTitle(const char *s) {
   printf("\x1b]0;%s\x1b\x5c",s);
+}
+
+void clearScreen(){
+  printf("\x1b[2j");
+  moveCursorHome();
+}
+
+char editorReadKey() {
+  int nread;
+  char c;
+  while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+    if (nread == -1) panic("read");
+  }
+  return c;
+}
+
+int GetCursorPosition(int *rows, int *cols){
+  printf("\x1b[6n");
+
+  printf("\r\n");
+  char c;
+  while (read(STDIN_FILENO, &c, 1) == 1) {
+    if (iscntrl(c)) {
+      printf("%d\r\n", c);
+    } else {
+      printf("%d ('%c')\r\n", c, c);
+    }
+  }
+
+  editorReadKey();
+
+  return -1;
+}
+
+int getWinsize(int *cols, int *rows){
+  CONSOLE_SCREEN_BUFFER_INFO csbi;
+
+
+  if (!GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)){
+    printf("\x1b[999C\x1b[999B");
+    return GetCursorPosition(rows,cols);
+    
+  }
+  if ((*cols = csbi.srWindow.Right - csbi.srWindow.Left + 1) == 0)
+    panic("0 cols");
+  *rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+  return 0;
 }
 
 void initEditor() {
@@ -60,23 +122,48 @@ void initEditor() {
   setMode();
   enterAlternateScreen();
   changeTitle("Vinh's Editor");
-  moveCursorto(0,0);
-  fflush(stdout);
+  if (getWinsize(&E.height, &E.width) == -1) panic("getWindowSize");
+}
+
+void terminate() {
+  clearScreen();
+  LeaveAlternateScreen();
+  printf("Goodbye\r\n");
+  exit(0);
+}
+
+/*View*/
+/*Input*/
+
+void editorProcessKeypress() {
+  char c = editorReadKey();
+
+  switch (c) {
+    case CTRL_KEY('q'):
+    terminate();
+    break;
+  }
+}
+
+/*Output*/
+void drawRows(){
+  int y;
+  for (y = 0; y < E.height; y++) {
+    printf("~\r\n");
+  }
+}
+
+void refreshScreen(){
+  clearScreen();
+  drawRows();
+  moveCursorHome();
 }
 
 int main() {
   initEditor();
-  char input;
-  while (read(STDIN_FILENO, &input, 1) == 1){
-    if (GetKeyState(VK_CONTROL) & 0x80)
-      printf("%d\n",input);
-    else 
-      printf("%d (%c)\n",input,input);
-
-    if (input == 'q')
-      break;
-    
+  while (1){
+    refreshScreen();
+    editorProcessKeypress();
   }
-  LeaveAlternateScreen();
   return 0;
 }
