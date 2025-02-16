@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
 #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
 #include <stdbool.h>
@@ -10,8 +9,10 @@
 
 /*struct*/
 struct editorConfig {
-  int width;
-  int height;
+  int win_width;
+  int win_height;
+  HANDLE org_stdin;
+  DWORD org_mode;
 };
 
 struct editorConfig E;
@@ -22,21 +23,26 @@ void panic(const char *s) {
   exit(1);
 }
 
-void setMode() {
-  HANDLE hStdin;
-  hStdin = GetStdHandle(STD_INPUT_HANDLE);
+void resetMode() {
+  SetConsoleMode(E.org_stdin, E.org_mode);
+}
+
+void setConsole() {
+  E.org_stdin = GetStdHandle(STD_INPUT_HANDLE);
+  GetConsoleMode(E.org_stdin, &E.org_mode);
   DWORD mode = 0;
-  SetConsoleMode(hStdin,mode);
+  atexit(resetMode);
+  SetConsoleMode(E.org_stdin,mode);
   mode = ENABLE_INSERT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT 
         | ENABLE_MOUSE_INPUT | ENABLE_PROCESSED_INPUT ;
-  SetConsoleMode(hStdin,mode);
+  SetConsoleMode(E.org_stdin,mode);
 }
 
 void enableVT () {
   HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
   if (hOut == INVALID_HANDLE_VALUE)
   {
-    panic("Failed to get HANDLE");
+    panic("Failed to get Output HANDLE");
   }
 
   DWORD dwMode = 0;
@@ -78,37 +84,39 @@ void clearScreen(){
 char editorReadKey() {
   int nread;
   char c;
-  while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+  while ((nread = ReadFile(E.org_stdin, &c, 1,NULL,NULL)) != 1) {
     if (nread == -1) panic("read");
   }
   return c;
 }
 
-int GetCursorPosition(int *rows, int *cols){
+int getCursorPosition(int *rows, int *cols){
+  char buf[32];
+  unsigned int i = 0;
   printf("\x1b[6n");
 
-  printf("\r\n");
-  char c;
-  while (read(STDIN_FILENO, &c, 1) == 1) {
-    if (iscntrl(c)) {
-      printf("%d\r\n", c);
-    } else {
-      printf("%d ('%c')\r\n", c, c);
-    }
+  while(i < sizeof(buf) - 1){
+    if (ReadFile(E.org_stdin, &buf[i], 1, NULL, NULL) != 1) break;
+    if (buf[i] == 'R') break;
+    i++;
   }
+  
+  buf[i] = '\0';
+  printf("\n&buf[1]: '%s'\n", &buf[1]);
 
-  editorReadKey();
+  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if (sscanf_s(&buf[2], "%d;%d", rows, cols) != 2) return -1;
 
-  return -1;
+  return 0;
 }
 
 int getWinsize(int *cols, int *rows){
   CONSOLE_SCREEN_BUFFER_INFO csbi;
 
 
-  if (!GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)){
-    printf("\x1b[999C\x1b[999B");
-    return GetCursorPosition(rows,cols);
+  if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi) == 0){
+    printf("\x1b[999C\x1b[999B"); //Move cusor to the bottom right
+    return getCursorPosition(rows,cols);
     
   }
   if ((*cols = csbi.srWindow.Right - csbi.srWindow.Left + 1) == 0)
@@ -119,16 +127,16 @@ int getWinsize(int *cols, int *rows){
 
 void initEditor() {
   enableVT();
-  setMode();
+  setConsole();
   enterAlternateScreen();
   changeTitle("Vinh's Editor");
-  if (getWinsize(&E.height, &E.width) == -1) panic("getWindowSize");
+  if (getWinsize(&E.win_height, &E.win_width) == -1) panic("getWindowSize");
 }
 
 void terminate() {
   clearScreen();
   LeaveAlternateScreen();
-  printf("Goodbye\r\n");
+  printf("Goodbye\n");
   exit(0);
 }
 
@@ -148,8 +156,11 @@ void editorProcessKeypress() {
 /*Output*/
 void drawRows(){
   int y;
-  for (y = 0; y < E.height; y++) {
-    printf("~\r\n");
+  for (y = 0; y < E.win_height; y++) {
+    printf("~");
+
+    if(y < E.win_height - 1)
+      printf("\n");
   }
 }
 
