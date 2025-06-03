@@ -21,7 +21,8 @@ struct editorConfig {
   int win_height;
   void *org_stdin;
   void *org_stdout;
-  unsigned long org_mode;
+  unsigned long org_mode_in;
+  unsigned long org_mode_out;
 };
 
 struct editorConfig E;
@@ -32,35 +33,46 @@ void panic(const char *s) {
   exit(1);
 }
 
-void reset_mode() { SetConsoleMode(E.org_stdin, E.org_mode); }
+void reset_mode() { SetConsoleMode(E.org_stdin, E.org_mode_in); SetConsoleMode(E.org_stdout, E.org_mode_out); }
 
-void setup_console() {
-  E.org_stdin = GetStdHandle(STD_INPUT_HANDLE);
-  E.org_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-  GetConsoleMode(E.org_stdin, &E.org_mode);
-  unsigned long mode = 0;
-  atexit(reset_mode);
+void setup_config(){
+  if ((E.org_stdout = GetStdHandle(STD_OUTPUT_HANDLE)) == INVALID_HANDLE_VALUE) {
+    panic("Failed to get Output HANDLE");
+  }
+  if ((E.org_stdin = GetStdHandle(STD_INPUT_HANDLE)) == INVALID_HANDLE_VALUE) {
+    panic("Failed to get Input HANDLE");
+  }
+  if ( GetConsoleMode(E.org_stdin, &E.org_mode_in) == 0) {
+    panic("Failed to get console mode input");
+  }
+  if ( GetConsoleMode(E.org_stdout, &E.org_mode_out) == 0) {
+    panic("Failed to get console mode output");
+  }
+}
+
+void setup_console_input() {
+  unsigned long mode = E.org_mode_in;
   SetConsoleMode(E.org_stdin, mode);
-  mode = ENABLE_INSERT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT |
+  mode |= ENABLE_INSERT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT |
          ENABLE_MOUSE_INPUT ;
+  mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
   SetConsoleMode(E.org_stdin, mode);
 }
 
-void enable_vt_mode() {
-  void *hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (hOut == INVALID_HANDLE_VALUE) {
-    panic("Failed to get Output HANDLE");
-  }
-
-  unsigned long dwMode = 0;
-  if (!GetConsoleMode(hOut, &dwMode)) {
+void setup_console_output() {
+  unsigned long dwMode = E.org_mode_out;
+  if (!GetConsoleMode(E.org_stdout, &dwMode)) {
     panic("Failed to get console mode output");
   }
-  SetConsoleMode(hOut, dwMode);
-
-  dwMode = ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN |
+  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN |
            ENABLE_PROCESSED_OUTPUT;
-  SetConsoleMode(hOut, dwMode);
+  SetConsoleMode(E.org_stdout, dwMode);
+}
+
+void setup_console(){
+  setup_console_input();
+  setup_console_output();
+  atexit(reset_mode);
 }
 
 ///append data to buffer to write
@@ -81,10 +93,12 @@ void enter_alternate_screen(struct abuf *ab) {
   ab_append(ab, "\x1b[?1049h", 8);
 }
 
-void LeaveAlternateScreen(struct abuf *ab) { ab_append(ab, "\x1b[?1049l", 8); }
+void leave_alternate_screen(struct abuf *ab) { ab_append(ab, "\x1b[?1049l", 8); }
 
-void moveCursorto(unsigned int x, unsigned int y) {
-  printf("\x1b[%d;%dH", x, y);
+void move_caret_to(unsigned int x, unsigned int y, struct abuf *ab) {
+  char ansi_esc_sq[80];
+  int pos_len = snprintf(ansi_esc_sq, sizeof(ansi_esc_sq), "\x1b[%d;%dH", x, y);
+  ab_append(ab, ansi_esc_sq, pos_len);
 }
 
 void move_caret_home(struct abuf *ab) { ab_append(ab, "\x1b[H", 3); }
@@ -107,7 +121,7 @@ char editor_read_key() {
   int nread;
   char c;
   while ((nread = ReadFile(E.org_stdin, &c, 1, NULL, NULL)) != 1) {
-    if (nread == -1)
+    if (nread == 0)
       panic("read");
   }
   return c;
@@ -116,8 +130,8 @@ char editor_read_key() {
 int get_cursor_position(int *rows, int *cols) {
   char buf[32];
   unsigned int i = 0;
-
-  if (WriteFile(E.org_stdout, "\x1b[6n", 4, NULL, NULL) != 4)
+  unsigned long bytes_written;
+  if (WriteFile(E.org_stdout, "\x1b[6n", 4, &bytes_written, NULL) != 1 || bytes_written != 4)
     return -1;
 
   while (i < sizeof(buf) - 1) {
@@ -141,10 +155,10 @@ int get_cursor_position(int *rows, int *cols) {
 int get_win_size(int *cols, int *rows) {
   CONSOLE_SCREEN_BUFFER_INFO csbi;
 
-  if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi) == 0) {
+  if (GetConsoleScreenBufferInfo(E.org_stdout,&csbi) == 0) {
     // Move cusor to the absolute bottom right
-    unsigned long byte_written;
-    if (!WriteFile(E.org_stdout, "\x1b[999C\x1b[999B", 12, &byte_written, NULL) || byte_written  != 12)
+    unsigned long bytes_written;
+    if (!WriteFile(E.org_stdout, "\x1b[999C\x1b[999B", 12, &bytes_written, NULL) || bytes_written  != 12)
       return -1;
     return get_cursor_position(rows, cols);
   }
@@ -157,7 +171,7 @@ int get_win_size(int *cols, int *rows) {
 
 void init_editor() {
   struct abuf ab = ABUF_INIT;
-  enable_vt_mode();
+  setup_config();
   setup_console();
   enter_alternate_screen(&ab);
   change_title("Vinh's Editor",&ab);
@@ -178,7 +192,7 @@ void terminate() {
   struct abuf ab = ABUF_INIT;
 
   clear_screen(&ab);
-  LeaveAlternateScreen(&ab);
+  leave_alternate_screen(&ab);
   ab_append(&ab, "Goodbye.", 8);
   WriteFile(E.org_stdout, ab.buffer, ab.len, NULL, NULL);
   ab_free(&ab);
@@ -231,7 +245,6 @@ void draw_rows(struct abuf *ab) {
 
 void refresh_screen() {
   struct abuf ab = ABUF_INIT;
-
   clear_screen(&ab);
   hide_caret(&ab);
   move_caret_home(&ab);
