@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #define WIN32_LEAN_AND_MEAN
 #include <stdbool.h>
 #include <windows.h>
@@ -17,8 +18,9 @@ struct abuf {
 };
 
 struct editorConfig {
-  int win_width;
-  int win_height;
+  uint16_t caret_x_pos, caret_y_pos;
+  uint32_t win_width;
+  uint32_t win_height;
   void *org_stdin;
   void *org_stdout;
   unsigned long org_mode_in;
@@ -26,6 +28,15 @@ struct editorConfig {
 };
 
 struct editorConfig E;
+
+/*util*/
+uint16_t u16_sat_add(uint16_t a, uint16_t b){
+  return (a > 0xFFFF -b) ? 0xFFFF : a + b;
+}
+
+uint16_t u16_sat_sub(uint16_t a, uint16_t b){
+  return (a < b) ? 0: a -b;
+}
 
 /*terminal*/
 void panic(const char *s) {
@@ -96,9 +107,11 @@ void enter_alternate_screen(struct abuf *ab) {
 void leave_alternate_screen(struct abuf *ab) { ab_append(ab, "\x1b[?1049l", 8); }
 
 void move_caret_to(unsigned int x, unsigned int y, struct abuf *ab) {
-  char ansi_esc_sq[80];
-  int pos_len = snprintf(ansi_esc_sq, sizeof(ansi_esc_sq), "\x1b[%d;%dH", x, y);
-  ab_append(ab, ansi_esc_sq, pos_len);
+  char ansi_esc_sq[32];
+  uint16_t pos_len = snprintf(ansi_esc_sq, sizeof(ansi_esc_sq), "\x1b[%u;%uH", y, x);
+  if (pos_len > 0 ) {
+    ab_append(ab, ansi_esc_sq, pos_len);
+  }
 }
 
 void move_caret_home(struct abuf *ab) { ab_append(ab, "\x1b[H", 3); }
@@ -127,7 +140,7 @@ char editor_read_key() {
   return c;
 }
 
-int get_cursor_position(int *rows, int *cols) {
+int get_cursor_position(uint32_t *rows, uint32_t *cols) {
   char buf[32];
   unsigned int i = 0;
   unsigned long bytes_written;
@@ -152,7 +165,7 @@ int get_cursor_position(int *rows, int *cols) {
   return 0;
 }
 
-int get_win_size(int *cols, int *rows) {
+int get_win_size(uint32_t *cols, uint32_t *rows) {
   CONSOLE_SCREEN_BUFFER_INFO csbi;
 
   if (GetConsoleScreenBufferInfo(E.org_stdout,&csbi) == 0) {
@@ -173,16 +186,22 @@ void init_editor() {
   struct abuf ab = ABUF_INIT;
   setup_config();
   setup_console();
+  E.caret_x_pos = 0;
+  E.caret_y_pos = 0;
   enter_alternate_screen(&ab);
   change_title("Vinh's Editor",&ab);
   switch (get_win_size(&E.win_width, &E.win_height)) {
-  case 0:
-    break;
-  case -1:
-    panic("Can't get window size");
-    break;
-  case -2:
-    panic("Window size is too small");
+    case 0:
+      break;
+    case -1:
+      panic("Can't get window size");
+      break;
+    case -2:
+      panic("Window size is too small");
+      break;
+    default:
+      panic("Unknown error getting window size");
+      break;
   }
   WriteFile(E.org_stdout, ab.buffer, ab.len, NULL, NULL);
   ab_free(&ab);
@@ -202,19 +221,42 @@ void terminate() {
 /*View*/
 /*Input*/
 
+void editor_move_caret(char key){
+  switch (key) {
+    case ('w'):
+      E.caret_y_pos = u16_sat_sub(E.caret_y_pos,1);
+      break;
+    case ('a'):
+      E.caret_x_pos = u16_sat_sub(E.caret_x_pos,1);
+      break;
+    case ('s'):
+      E.caret_y_pos = u16_sat_add(E.caret_y_pos, 1);
+      break;
+    case ('d'):
+      E.caret_x_pos = u16_sat_add(E.caret_x_pos, 1);
+      break;
+  }
+}
+
 void editor_process_keypress() {
   char c = editor_read_key();
 
   switch (c) {
-  case CTRL_KEY('q'):
+    case CTRL_KEY('q'):
     terminate();
+    break;
+    case ('w'):
+    case ('a'):
+    case ('s'):
+    case ('d'):
+    editor_move_caret(c);
     break;
   }
 }
 
 void draw_welcome_message(struct abuf *ab) {
   char welcome[80];
-  int welcomeLen =
+  uint16_t welcomeLen =
       snprintf(welcome, sizeof(welcome), "El-Editor version %s", VERSION);
   if (welcomeLen > E.win_width)
     welcomeLen = E.win_width;
@@ -231,7 +273,7 @@ void draw_welcome_message(struct abuf *ab) {
 /* Output */
 void draw_rows(struct abuf *ab) {
   int vertical_centered = E.win_height / 3;
-  int current_rows;
+  uint16_t current_rows;
   for (current_rows = 0; current_rows < E.win_height; current_rows++) {
     clear_line(ab);
     if (current_rows == vertical_centered) {
@@ -249,7 +291,7 @@ void refresh_screen() {
   hide_caret(&ab);
   move_caret_home(&ab);
   draw_rows(&ab);
-  move_caret_home(&ab);
+  move_caret_to(E.caret_x_pos + 1, E.caret_y_pos + 1, &ab);
   show_caret(&ab);
   WriteFile(E.org_stdout, ab.buffer, ab.len, NULL, NULL);
   ab_free(&ab);
