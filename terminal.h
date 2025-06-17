@@ -50,6 +50,6 @@ int get_win_size(int *rows, int *cols);
 
 void terminate(void);
 
-void terminal_init(void);
+void init_terminal(void);
 
 #endif // TERMINAL_H

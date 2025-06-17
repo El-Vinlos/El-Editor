@@ -105,22 +105,37 @@ int editor_read_key(void){
 }
 
 void editor_move_caret(int key){
+  erow *row = (E.caret_y_pos >= E.num_rows) ? NULL : &E.row[E.caret_y_pos];
+
   switch (key) {
     case arrow_up:
-    E.y_pos = u16_sat_sub(E.y_pos, 1);
+    E.caret_y_pos = sat_sub(E.caret_y_pos, 1);
     break;
     case arrow_left:
-    E.x_pos = u16_sat_sub(E.x_pos, 1);
+      if (E.caret_x_pos != 0) {
+        E.caret_x_pos--;
+      } else if (E.caret_y_pos > 0) {
+        E.caret_y_pos--;
+        E.caret_x_pos = E.row[E.caret_y_pos].size;
+      }
     break;
     case arrow_down:
-      if (E.y_pos < E.screen_rows - 1) {
-        E.y_pos = u16_sat_add(E.y_pos, 1);
+      if (E.caret_y_pos < E.num_rows) {
+        E.caret_y_pos = sat_add(E.caret_y_pos, 1);
       }
     break;
     case arrow_right:
-      if (E.x_pos < E.screen_cols - 1) {
-        E.x_pos = u16_sat_add(E.x_pos,1);
+      if (row && E.caret_x_pos < row->size) {
+        E.caret_x_pos = sat_add(E.caret_x_pos,1);
+      } else if (row && E.caret_x_pos == row->size) {
+        E.caret_y_pos = sat_add(E.caret_y_pos, 1);
+        E.caret_x_pos = 0;
       }
+  } 
+  row = (E.caret_y_pos >= E.num_rows) ? NULL : &E.row[E.caret_y_pos];
+  int row_len = row ? row->size : 0;
+  if (E.caret_x_pos > row_len) {
+    E.caret_x_pos = row_len;
   }
 }
 
@@ -141,11 +156,11 @@ void editor_process_key(void){
     break;
 
     case home_key:
-    E.x_pos = 0;
+    E.caret_x_pos = 0;
     break;
 
     case end_key:
-      E.x_pos = E.screen_cols - 1;
+      E.caret_x_pos = E.row[E.caret_y_pos].size;
     break;
 
 
@@ -179,8 +194,9 @@ void editor_draw_welcome(struct abuf *ab){
 
 void editor_draw_rows(struct abuf *ab){
   for (int y = 0; y < E.screen_rows; y++) {
-    if (y < E.num_rows) {
-      editor_draw_erow(ab,y);
+    int file_row = y + E.row_offset;
+    if (file_row < E.num_rows) {
+      editor_draw_erow(ab,file_row, E.col_offset);
     } else {
       ab_append(ab, "~", 1);
     }
@@ -193,10 +209,10 @@ void editor_draw_rows(struct abuf *ab){
   }
 }
 
-void editor_draw_erow(struct abuf *ab, int y){
-  int len = E.row[y].size;
-  if (len > E.screen_cols) len = E.screen_cols;
-  ab_append(ab, E.row[y].chars, len);
+void editor_draw_erow(struct abuf *ab, int y, int x){
+  unsigned int len = sat_sub(E.row[y].size, x);
+  if (len > (unsigned int)E.screen_cols) len = E.screen_cols;
+  ab_append(ab, &E.row[y].chars[x], len);
 }
 
 void draw_welcome_message(struct abuf *ab){
@@ -216,7 +232,31 @@ void draw_welcome_message(struct abuf *ab){
   ab_append(ab, welcome_message, welcome_len);
 }
 
+int editor_scroll(){
+  if (E.caret_y_pos < E.row_offset) {
+    E.row_offset = E.caret_y_pos;
+    return 1;
+  }
+  if (E.caret_y_pos >= E.row_offset + E.screen_rows) {
+    E.row_offset = E.caret_y_pos - E.screen_rows + 1;
+    return 1;
+  }
+
+  if (E.caret_x_pos < E.col_offset) {
+    E.col_offset = E.caret_x_pos;
+    return 1;
+  }
+  if (E.caret_x_pos >= E.col_offset + E.screen_cols) {
+    E.col_offset = E.caret_x_pos - E.screen_cols + 1;
+    return 1;
+  }
+  return 0;
+}
+
 void editor_refresh_screen(void (*draw_fn)(struct abuf *ab)){
+  if (editor_scroll()) {
+    E.need_redrawn = true;
+  }
   struct abuf ab = ABUF_INIT;
   if (E.need_redrawn) {
     hide_caret(&ab);
@@ -224,7 +264,7 @@ void editor_refresh_screen(void (*draw_fn)(struct abuf *ab)){
     draw_fn(&ab);
     show_caret(&ab);
   }
-  move_caret_to(E.x_pos + 1, E.y_pos + 1, &ab);
+  move_caret_to( (E.caret_x_pos - E.col_offset + 1), (E.caret_y_pos - E.row_offset + 1), &ab);
   E.need_redrawn = false;
   write(STDOUT_FILENO, ab.buffer, ab.len);
   ab_free(&ab);

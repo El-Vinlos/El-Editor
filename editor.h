@@ -20,10 +20,11 @@ typedef struct editor_row{
 } erow;
 
 struct editor_config {
-  int x_pos,y_pos;
+  int caret_x_pos,caret_y_pos;
   int screen_rows;
   int screen_cols;
-  int rowoff;
+  int row_offset;
+  int col_offset;
   int num_rows;
   erow *row;
   bool need_redrawn;
@@ -52,8 +53,9 @@ void editor_move_key(char key);
 void editor_draw_rows(struct abuf *ab);
 void editor_draw_welcome(struct abuf *ab);
 void draw_welcome_message(struct abuf *ab);
-void editor_draw_erow(struct abuf *ab, int y);
+void editor_draw_erow(struct abuf *ab, int y, int x);
 int trim_newline_char(int line_len, char *line);
 void editor_append_row(char *s, size_t len);
+int editor_scroll();
 
 #endif // EDITOR_H

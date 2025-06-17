@@ -143,12 +143,13 @@ void terminate(void){
   ab_free(&ab);
 }
 
-void terminal_init(void){
+void init_terminal(void){
   struct abuf ab = ABUF_INIT;
-  E.x_pos = 0;
-  E.y_pos = 0;
+  E.caret_x_pos = 0;
+  E.caret_y_pos = 0;
   E.num_rows = 0;
-  E.rowoff = 0;
+  E.row_offset = 0;
+  E.col_offset = 0;
   E.row = NULL;
   E.need_redrawn = true;
   enter_alternate_screen(&ab);

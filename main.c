@@ -1,11 +1,11 @@
 //
-// Created by El-Vinlos on 16/6/25.
+// Created by El-Vinlos on 11/6/25.
 //
 #include "editor.h"
 
 int main(int argc, char *argv[])
 {
-    terminal_init();
+    init_terminal();
     if (argc >= 2) {
         editor_open(argv[1]);
     } else {

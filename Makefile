@@ -1,5 +1,5 @@
 CC = gcc-15
-CFLAGS = -Wall -Wextra -std=c99 -pedantic
+CFLAGS = -Wall -Wextra -Werror -std=c99 -pedantic
 OBJ = main.o editor.o terminal.o utils.o
 TARGET = El-Editor
 
