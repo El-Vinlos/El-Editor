@@ -41,7 +41,38 @@ void editor_append_row(char *s, size_t len){
   E.row[at].chars = malloc(len + 1);
   memcpy(E.row[at].chars, s, len);
   E.row[at].chars[len] = '\0';
+
+  E.row[at].render_size = 0;
+  E.row[at].render = NULL;
+  editor_update_row(&E.row[at]);
+
   E.num_rows++;
+}
+
+void editor_update_row(erow *row){
+  int tabs = 0;
+
+  for (int i = 0; i < row->size; i++) {
+    if (row->chars[i] == '\t') tabs++;
+  }
+
+  free(row->render);
+  row->render = malloc(row->size + tabs*(TAP_STOP - 1) + 1);
+
+  int render_index = 0;
+  for (int i = 0; i < row->size; i++) {
+    if (row->chars[i] == '\t') {
+      row->render[render_index++] = ' ';
+      while (render_index % TAP_STOP != 0) {
+        row->render[render_index++] = ' ';
+      }
+    } else {
+      row->render[render_index++] = row->chars[i];
+    }
+  }
+
+  row->render[render_index] = '\0';
+  row->render_size = render_index;
 }
 
 int trim_newline_char(int line_len, char *line){
@@ -210,9 +241,9 @@ void editor_draw_rows(struct abuf *ab){
 }
 
 void editor_draw_erow(struct abuf *ab, int y, int x){
-  unsigned int len = sat_sub(E.row[y].size, x);
+  unsigned int len = sat_sub(E.row[y].render_size, x);
   if (len > (unsigned int)E.screen_cols) len = E.screen_cols;
-  ab_append(ab, &E.row[y].chars[x], len);
+  ab_append(ab, &E.row[y].render[x], len);
 }
 
 void draw_welcome_message(struct abuf *ab){

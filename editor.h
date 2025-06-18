@@ -10,13 +10,16 @@
 
 
 #define VERSION "0.01"
+#define TAP_STOP 2
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 /// essentially a c++ vector
 typedef struct editor_row{
   int size;
+  int render_size;
   char *chars;
+  char *render;
 } erow;
 
 struct editor_config {
@@ -56,6 +59,7 @@ void draw_welcome_message(struct abuf *ab);
 void editor_draw_erow(struct abuf *ab, int y, int x);
 int trim_newline_char(int line_len, char *line);
 void editor_append_row(char *s, size_t len);
+void editor_update_row(erow *row);
 int editor_scroll();
 
 #endif // EDITOR_H

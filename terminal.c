@@ -152,6 +152,7 @@ void init_terminal(void){
   E.col_offset = 0;
   E.row = NULL;
   E.need_redrawn = true;
+
   enter_alternate_screen(&ab);
   enable_raw_mode();
   atexit(terminate);
